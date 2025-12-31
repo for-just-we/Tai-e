@@ -1,12 +1,22 @@
 # Changelog
 
-## [Unreleased] - 2025-02-16
+## [Unreleased] - 2025-12-31
+
+## [0.5.2] - 2025-12-31
 
 ### New Features
 - Add format check for command-line arguments.
+- Add performance monitoring (CPU and memory usage) functionality to `Monitor`.
 - Pointer analysis
   - Add special handling for zero-length arrays to enhance PTA precision.
   - Add may-alias-pair client to count may-alias variable pairs.
+  - Model `Arrays.copyOf` for non-functional arrays for soundness.
+  - Model `jdk.internal.misc.Unsafe` to obtain sound results for `ConcurrentHashMap`.
+  - Improve the performance of `Obj.getType()` by caching `Obj`'s type.
+- Side-effect analysis
+  - Improve `SideEffectAnalysis` precision using context-sensitive information and more efficient algorithms.
+- Class hierarchy analysis (CHA)
+  - Improve `CHABuilder` precision via resolving callees using the type of the receiver variable.
 
 ### Fixes
 - Fix NPE in Zipper-e pre-analysis.
@@ -19,6 +29,14 @@
 - Fix `SideEffectAnalysis` incorrect behavior when `only-app` is false.
 - Fix Mahjong's `FieldPointsToGraph` by handling non-functional `MockObj` in `PointerAnalysisResultImpl`.
 - Fix the detection of jar files in `BenchmarkRunner`.
+- Fix `CHABuilder` method resolution for static and special methods.
+- Fix shadowed instance fields in dumped points-to set.
+- Fix missing edges when converting context-sensitive call graph to context-insensitive call graph.
+- Escape special characters in `StringLiteral`.
+
+### Contributors
+
+We would like to thank the following community members for their contributions to [this release](https://github.com/pascal-lab/Tai-e/compare/v0.5.1...v0.5.2): [cs-cat](https://github.com/cs-cat), [Jinpeng Wang](https://github.com/jjppp), [FoggyDawn](https://github.com/FoggyDawn), [Zhenyu Yan](https://github.com/Michael1015198808), [RacerZ](https://github.com/RacerZ-fighting), [Chenxi Li](https://github.com/ayanamists), [Teng Zhang](https://github.com/zhangt2333), [Zhiwei Zhang](https://github.com/auroraberry).
 
 ## [0.5.1] - 2024-12-31
 
@@ -108,7 +126,8 @@ We would like to thank the following community members for their contributions t
 - First release.
 
 
-[Unreleased]: https://github.com/pascal-lab/Tai-e/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/pascal-lab/Tai-e/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/pascal-lab/Tai-e/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pascal-lab/Tai-e/compare/v0.2.2...v0.5.1
 [0.2.2]: https://github.com/pascal-lab/Tai-e/compare/v0.0.3...v0.2.2
 [0.0.3]: https://github.com/pascal-lab/Tai-e/releases/tag/v0.0.3
