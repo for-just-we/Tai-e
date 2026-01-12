@@ -22,6 +22,8 @@
 
 package pascal.taie.ir.exp;
 
+import pascal.taie.analysis.pta.plugin.cutshortcut.field.AbstractLoadField;
+import pascal.taie.analysis.pta.plugin.cutshortcut.field.AbstractStoreField;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.LoadArray;
 import pascal.taie.ir.stmt.LoadField;
@@ -216,6 +218,21 @@ public class Var implements LValue, RValue, Indexable {
         return relevantStmts.getInvokes();
     }
 
+    // Support Cut-Shortcut field access pattern analysis
+    public void addAbstractLoadField(AbstractLoadField abstractLoadField) {
+        ensureRelevantStmts();
+        relevantStmts.addAbstractLoadField(abstractLoadField);
+    }
+
+    public List<AbstractLoadField> getAbstractLoadFields() { return relevantStmts.getAbstractLoadFields(); }
+
+    public void addAbstractStoreField(AbstractStoreField abstractStoreField) {
+        ensureRelevantStmts();
+        relevantStmts.addAbstractStoreField(abstractStoreField);
+    }
+
+    public List<AbstractStoreField> getAbstractStoreFields() { return relevantStmts.getAbstractStoreFields(); }
+
     /**
      * Ensure {@link #relevantStmts} points to an instance other than
      * {@link RelevantStmts#EMPTY}.
@@ -253,6 +270,8 @@ public class Var implements LValue, RValue, Indexable {
      * load array: x = v[i];
      * store array: v[i] = x;
      * invocation: v.f();
+     * abstract load field: x = absv.f; (for Cut-Shortcut analysis)
+     * abstract store field: absv.f = x; (for Cut-Shortcut analysis)
      * We use a separate class to store these relevant statements
      * (instead of directly storing them in {@link Var}) for saving space.
      * Most variables do not have any relevant statements, so these variables
@@ -272,6 +291,10 @@ public class Var implements LValue, RValue, Indexable {
         private List<LoadArray> loadArrays = List.of();
         private List<StoreArray> storeArrays = List.of();
         private List<Invoke> invokes = List.of();
+
+        // Support Cut-Shortcut field access pattern analysis
+        private List<AbstractLoadField> abstractLoadFields = List.of();
+        private List<AbstractStoreField> abstractStoreFields = List.of();
 
         private List<LoadField> getLoadFields() {
             return unmodifiable(loadFields);
@@ -326,6 +349,25 @@ public class Var implements LValue, RValue, Indexable {
                 invokes = new ArrayList<>(DEFAULT_CAPACITY);
             }
             invokes.add(invoke);
+        }
+
+        // Support Cut-Shortcut field access pattern analysis
+        private List<AbstractStoreField> getAbstractStoreFields() { return unmodifiable(abstractStoreFields); }
+
+        private void addAbstractStoreField(AbstractStoreField abstractStoreField) {
+            if (abstractStoreFields.isEmpty()) {
+                abstractStoreFields = new ArrayList<>();
+            }
+            abstractStoreFields.add(abstractStoreField);
+        }
+
+        private List<AbstractLoadField> getAbstractLoadFields() { return unmodifiable(abstractLoadFields); }
+
+        private void addAbstractLoadField(AbstractLoadField abstractLoadField) {
+            if (abstractLoadFields.isEmpty()) {
+                abstractLoadFields = new ArrayList<>();
+            }
+            abstractLoadFields.add(abstractLoadField);
         }
 
         private static <T> List<T> unmodifiable(List<T> list) {

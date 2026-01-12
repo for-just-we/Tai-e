@@ -25,6 +25,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 import pascal.taie.World;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.Host;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.classes.ClassNames;
@@ -94,6 +95,9 @@ public class MapBasedCSManager implements CSManager {
     }
 
     @Override
+    public HostPointer getHostPointer(Host host, String category) { return ptrManager.getHostPointer(host, category); }
+
+    @Override
     public Collection<StaticField> getStaticFields() {
         return ptrManager.getStaticFields();
     }
@@ -156,6 +160,8 @@ public class MapBasedCSManager implements CSManager {
 
         private final Map<CSObj, ArrayIndex> arrayIndexes = Maps.newMap();
 
+        private final TwoKeyMap<Host, String, HostPointer> hostPointers = Maps.newTwoKeyMap();
+
         /**
          * Counter for assigning unique indexes to Pointers.
          */
@@ -179,6 +185,11 @@ public class MapBasedCSManager implements CSManager {
         private ArrayIndex getArrayIndex(CSObj array) {
             return arrayIndexes.computeIfAbsent(array,
                     a -> new ArrayIndex(a, counter++));
+        }
+
+        private HostPointer getHostPointer(Host host, String category) {
+            return hostPointers.computeIfAbsent(host, category,
+                    (h, c) -> new HostPointer(h, c, counter++));
         }
 
         private Collection<Var> getVars() {
