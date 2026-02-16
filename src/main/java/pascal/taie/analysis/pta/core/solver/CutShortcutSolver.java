@@ -11,18 +11,14 @@ import pascal.taie.analysis.pta.plugin.CompositePlugin;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.plugin.cutshortcut.container.ContainerAccessHandler;
 import pascal.taie.analysis.pta.plugin.cutshortcut.container.ContainerConfig;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.HostMap.HostList;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.HostMap.HostSet;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.HostMap.HostSetFactory;
-import pascal.taie.analysis.pta.plugin.cutshortcut.field.FieldAccessHandler;
-import pascal.taie.analysis.pta.plugin.cutshortcut.field.ParameterIndex;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.HostKind;
+import pascal.taie.analysis.pta.plugin.cutshortcut.field.*;
 import pascal.taie.analysis.pta.plugin.reflection.ReflectiveCallEdge;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.config.AnalysisOptions;
 import pascal.taie.ir.exp.Exp;
 import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.LoadField;
 import pascal.taie.ir.stmt.StoreField;
@@ -32,31 +28,34 @@ import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.NullType;
 import pascal.taie.language.type.ReferenceType;
 import pascal.taie.language.type.Type;
+import pascal.taie.util.collection.Maps;
+import pascal.taie.util.collection.MultiMap;
 import pascal.taie.util.collection.Sets;
+import pascal.taie.util.collection.TwoKeyMap;
 
 import java.util.Set;
 
 import static pascal.taie.analysis.pta.plugin.cutshortcut.ReflectiveEdgeProperty.setVirtualArg;
 import static pascal.taie.analysis.pta.plugin.cutshortcut.SpecialVariables.isNonRelay;
-import static pascal.taie.analysis.pta.plugin.cutshortcut.container.ClassAndTypeClassifier.isHashtableClass;
-import static pascal.taie.analysis.pta.plugin.cutshortcut.container.ClassAndTypeClassifier.isVectorClass;
+import static pascal.taie.analysis.pta.plugin.cutshortcut.container.ClassAndTypeClassifier.isHashtableType;
+import static pascal.taie.analysis.pta.plugin.cutshortcut.container.ClassAndTypeClassifier.isVectorType;
 
 public class CutShortcutSolver extends DefaultSolver {
     private ContainerConfig containerConfig;
-
-    private HostSetFactory hostSetFactory;
 
     private FieldAccessHandler fieldAccessHandler = null;
 
     private ContainerAccessHandler containerAccessHandler = null;
 
-    private final Set<Var> specialHandledReturnVars = Sets.newSet();
+    // cutRetuns resolved By LocalFlowHandler
+    private final Set<Var> cutReturnVars = Sets.newSet();
 
-    private final Set<StoreField> ignoredStoreFields = Sets.newSet();
-
-    private final Set<Invoke> recoveredCallSites = Sets.newSet();
+    private final Set<StoreField> cutStoreFields = Sets.newSet();
 
     private final Set<JMethod> selectedMethods = Sets.newSet();
+
+    // callsites whose callee should not be cut, handle container access whose object type is not modeled
+    private final Set<CSCallSite> recoveredCallSites = Sets.newSet();
 
     public CutShortcutSolver(AnalysisOptions options, HeapModel heapModel,
                              ContextSelector contextSelector, CSManager csManager) {
@@ -85,7 +84,6 @@ public class CutShortcutSolver extends DefaultSolver {
     @Override
     protected void initialize() {
         containerConfig = ContainerConfig.config;
-        hostSetFactory = new HostSetFactory(containerConfig.getHostIndexer());
         super.initialize();
     }
 
@@ -112,35 +110,50 @@ public class CutShortcutSolver extends DefaultSolver {
             else if (entry instanceof WorkList.CallEdgeEntry eEntry)
                 processCallEdge(eEntry.edge());
             else if (entry instanceof WorkList.SetStmtEntry sEntry)
-                fieldAccessHandler.onNewSetStatement(sEntry.method(), sEntry.fieldRef(), sEntry.baseIndex(), sEntry.rhsIndex());
+                fieldAccessHandler.onNewSetStatement(sEntry.csMethod(), sEntry.setStmt());
             else if (entry instanceof WorkList.GetStmtEntry gEntry)
-                fieldAccessHandler.onNewGetStatement(gEntry.method(), gEntry.lhsIndex(), gEntry.baseIndex(), gEntry.fieldRef());
+                fieldAccessHandler.onNewGetStatement(gEntry.csMethod(), gEntry.getStmt());
             else if (entry instanceof WorkList.HostEntry hEntry) {
                 Pointer p = hEntry.pointer();
-                HostSet diff = processHostEntry(hEntry);
+                PointsToSet diff = processHostEntry(hEntry);
                 if (p instanceof CSVar csVar && !diff.isEmpty())
-                    containerAccessHandler.onNewHostEntry(csVar, hEntry.kind(), diff);
+                    containerAccessHandler.onNewHostEntry(csVar, diff, hEntry.kind());
             }
         }
         plugin.onFinish();
     }
 
+    public boolean addRecoveredCallSite(CSCallSite csCallSite) {
+        return recoveredCallSites.add(csCallSite);
+    }
+
+    public boolean isRecoveredCallSite(CSCallSite csCallSite) {
+        return recoveredCallSites.contains(csCallSite);
+    }
+
     String[] stopSigns = new String[]{"iterator(", "entrySet()", "keySet()", "values()", "Entry(", "Iterator("};
 
-    public boolean needPropagateHost(Pointer source, FlowKind kind) {
-        if (kind == FlowKind.RETURN) {
-            CSVar csSource = (CSVar) source;
-            Var sourceVar = csSource.getVar();
+    /*
+     * @param source:  PFG edge s --> v, if source inside Transfer method, do not propagate ptsH
+     */
+    public boolean needPropagateHost(PointerFlowEdge edge) {
+        // Todo: Here return var of Map.values() --> r is treated as Local_Assign
+        if (edge.kind() == FlowKind.RETURN) {
+            Var sourceVar = ((CSVar) edge.source()).getVar();
             JClass container = sourceVar.getMethod().getDeclaringClass();
             String methodString = sourceVar.getMethod().toString();
-            if (containerConfig.isRealHostClass(container)) {
-                for (String stopSign : stopSigns) {
+            // container, entryset type
+            if (containerConfig.isHostClass(container)) {
+                // source variable is inside function: iterator, entryset, keyset, values. do not propagate to host
+                for (String stopSign: stopSigns) {
                     if (methodString.contains(stopSign))
                         return false;
                 }
-                if (isHashtableClass(container) && (methodString.contains("elements()") || methodString.contains("keys()")))
+                // HashTable.elements() return Enumeration of HashTable.values(), .keys() return Enumeration of keys
+                if (isHashtableType(container.getType()) && (methodString.contains("elements()") || methodString.contains("keys()")))
                     return false;
-                return !isVectorClass(container) || !methodString.contains("elements()");
+                // vector.elements() return Enumeration of Vector.elements
+                return !isVectorType(container.getType()) || !methodString.contains("elements()");
             }
             return true;
         }
@@ -156,18 +169,18 @@ public class CutShortcutSolver extends DefaultSolver {
         return type instanceof ReferenceType && !(type instanceof NullType);
     }
 
-    public void addIgnoredStoreField(StoreField set) { // 需要跳过的StoreField，位于最内层（你应该知道最内层的含义）的set方法
-        ignoredStoreFields.add(set);
+    public void addCutStoreField(StoreField set) { // 需要跳过的StoreField，位于最内层的set方法
+        cutStoreFields.add(set);
     }
 
-    private HostSet processHostEntry(WorkList.HostEntry entry) {
+    private PointsToSet processHostEntry(WorkList.HostEntry entry) {
         Pointer pointer = entry.pointer();
-        HostSet hostSet = entry.hostSet();
-        HostList.Kind kind = entry.kind();
-        HostSet diff = containerAccessHandler.getHostListOf(pointer).addAllDiff(kind, hostSet);
+        PointsToSet hostSet = entry.hostSet();
+        HostKind kind = entry.kind();
+        PointsToSet diff = containerAccessHandler.getHostListOf(pointer, kind).addAllDiff(hostSet);
         if (!diff.isEmpty()) {
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
-                if (needPropagateHost(edge.source(), edge.kind())) {
+                if (needPropagateHost(edge)) {
                     Pointer target = edge.target();
                     workList.addHostEntry(target, kind, diff);
                 }
@@ -180,18 +193,16 @@ public class CutShortcutSolver extends DefaultSolver {
         Context context = baseVar.getContext();
         Var var = baseVar.getVar();
         for (StoreField store : var.getStoreFields()) {
-            // for StoreFields that are recognized as a setStatement, we skip the process
-            if (ignoredStoreFields.contains(store))
+            // skip cutStores
+            if (cutStoreFields.contains(store))
                 continue;
             Var fromVar = store.getRValue();
-            if (isConcerned(fromVar)) {
+            if (propTypes.isAllowed(fromVar)) {
                 CSVar from = getCSManager().getCSVar(context, fromVar);
                 pts.forEach(baseObj -> {
                     JField field = store.getFieldRef().resolve();
-                    InstanceField instField = getCSManager().getInstanceField(
-                            baseObj, field);
-                    addPFGEdge(from, instField, FlowKind.INSTANCE_STORE, field.getType()
-                    );
+                    InstanceField instField = getCSManager().getInstanceField(baseObj, field);
+                    addPFGEdge(from, instField, FlowKind.INSTANCE_STORE);
                 });
             }
         }
@@ -203,7 +214,7 @@ public class CutShortcutSolver extends DefaultSolver {
         for (LoadField load : var.getLoadFields()) {
             Var toVar = load.getLValue();
             JField field = load.getFieldRef().resolveNullable();
-            if (isConcerned(toVar) && field != null) {
+            if (propTypes.isAllowed(toVar) && field != null) {
                 CSVar to = getCSManager().getCSVar(context, toVar);
                 pts.forEach(baseObj -> {
                     InstanceField instField = getCSManager().getInstanceField(
@@ -223,6 +234,7 @@ public class CutShortcutSolver extends DefaultSolver {
             CSMethod csCallee = edge.getCallee();
             addCSMethod(csCallee);
             if (edge.getKind() != CallKind.OTHER && !isIgnored(csCallee.getMethod())) {
+                CSCallSite csCallSite = edge.getCallSite();
                 Context callerCtx = edge.getCallSite().getContext();
                 Invoke callSite = edge.getCallSite().getCallSite();
                 Context calleeCtx = csCallee.getContext();
@@ -231,7 +243,7 @@ public class CutShortcutSolver extends DefaultSolver {
                 // pass arguments to parameters
                 for (int i = 0; i < invokeExp.getArgCount(); ++i) {
                     Var arg = invokeExp.getArg(i);
-                    if (isConcerned(arg)) {
+                    if (propTypes.isAllowed(arg)) {
                         Var param = callee.getIR().getParam(i);
                         CSVar argVar = getCSManager().getCSVar(callerCtx, arg);
                         CSVar paramVar = getCSManager().getCSVar(calleeCtx, param);
@@ -239,12 +251,12 @@ public class CutShortcutSolver extends DefaultSolver {
                     }
                 }
                 // pass results to LHS variable
-                if (!ContainerAccessHandler.CutReturnEdge(callSite, callee) || recoveredCallSites.contains(callSite)) {
-                    Var lhs = callSite.getResult();
-                    if (lhs != null && isConcerned(lhs)) {
+                Var lhs = callSite.getResult();
+                if (!ContainerAccessHandler.CutReturnEdge(lhs, callee) || recoveredCallSites.contains(csCallSite)) {
+                    if (lhs != null && propTypes.isAllowed(lhs)) {
                         CSVar csLHS = getCSManager().getCSVar(callerCtx, lhs);
                         for (Var ret : callee.getIR().getReturnVars()) {
-                            if (isConcerned(ret) && !specialHandledReturnVars.contains(ret)) {
+                            if (propTypes.isAllowed(ret) && !cutReturnVars.contains(ret)) {
                                 CSVar csRet = getCSManager().getCSVar(calleeCtx, ret);
                                 addPFGEdge(csRet, csLHS, FlowKind.RETURN);
                             }
@@ -256,17 +268,8 @@ public class CutShortcutSolver extends DefaultSolver {
         }
     }
 
-    public boolean addRecoveredCallSite(Invoke callSite) {
-        return recoveredCallSites.add(callSite);
-    }
-
-    public boolean isRecoveredCallSite(Invoke callSite) {
-        return recoveredCallSites.contains(callSite);
-    }
-
     public void addPFGEdge(Pointer source, Pointer target, FlowKind kind, Set<Transfer> transfers) {
         PointerFlowEdge edge = new PointerFlowEdge(kind, source, target);
-        transfers.forEach(edge::addTransfer);
         if (pointerFlowGraph.addEdge(edge) != null) {
             PointsToSet sourceSet = getPointsToSetOf(source);
             PointsToSet targetSet = makePointsToSet();
@@ -282,29 +285,39 @@ public class CutShortcutSolver extends DefaultSolver {
         }
     }
 
-    public void addSetStmtEntry(JMethod method, FieldRef fieldRef, ParameterIndex baseIndex, ParameterIndex rhsIndex) {
-        workList.addSetStmtEntry(method, fieldRef, baseIndex, rhsIndex);
+    @Override
+    public void addPFGEdge(PointerFlowEdge edge, Transfer transfer) {
+        edge = pointerFlowGraph.addEdge(edge);
+        if (edge != null) {
+            if (edge.addTransfer(transfer)) {
+                PointsToSet targetSet = transfer.apply(edge, getPointsToSetOf(edge.source()));
+                if (!targetSet.isEmpty())
+                    addPointsTo(edge.target(), targetSet);
+            }
+            plugin.onNewPFGEdge(edge);
+        }
     }
 
-    public void addGetStmtEntry(JMethod method, int lhsIndex, ParameterIndex baseIndex, FieldRef fieldRef) {
-        workList.addGetStmtEntry(method, lhsIndex, baseIndex, fieldRef);
+    public void addSetStmtEntry(CSMethod csMethod, SetStatement setStmt) {
+        workList.addSetStmtEntry(csMethod, setStmt);
     }
 
-    public void addHostEntry(Pointer pointer, HostList.Kind kind, HostSet hostSet) {
-        workList.addHostEntry(pointer, kind, hostSet);
+    public void addGetStmtEntry(CSMethod csMethod, GetStatement getStmt) {
+        workList.addGetStmtEntry(csMethod, getStmt);
     }
 
-    public void addSpecialHandledRetVar(Var ret) {
-        specialHandledReturnVars.add(ret);
+    public void addHostEntry(Pointer pointer, HostKind kind, PointsToSet hostSet) {
+        if (!hostSet.isEmpty())
+            workList.addHostEntry(pointer, kind, hostSet);
+    }
+
+    public void addCutReturnVar(Var ret) {
+        cutReturnVars.add(ret);
     }
 
     public void addSelectedMethod(JMethod method) { selectedMethods.add(method); }
 
     public Set<JMethod> getInvolvedMethods() {
         return selectedMethods;
-    }
-
-    public HostSet getEmptyHostSet() {
-        return hostSetFactory.make();
     }
 }

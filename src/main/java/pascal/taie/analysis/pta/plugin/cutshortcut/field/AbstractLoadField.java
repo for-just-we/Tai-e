@@ -11,12 +11,6 @@ public class AbstractLoadField extends FieldStmt<Var, FieldAccess> {
 
     public AbstractLoadField(Var lvalue, FieldAccess rvalue, boolean terminate) {
         super(lvalue, rvalue);
-
-        if (rvalue instanceof InstanceFieldAccess) {
-            Var base = ((InstanceFieldAccess) rvalue).getBase();
-            base.addAbstractLoadField(this);
-        }
-
         this.terminate = terminate;
     }
 

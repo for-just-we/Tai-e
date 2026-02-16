@@ -24,7 +24,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.heap.Obj;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.Host;
+
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.classes.JField;
@@ -125,9 +125,4 @@ public interface CSManager {
      * The indexer is useful for creating efficient points-to sets.
      */
     Indexer<CSObj> getObjectIndexer();
-
-    /**
-     * @return the HostPointer for given host and category used in Cut-Shortcut.
-     */
-    HostPointer getHostPointer(Host host, String category);
 }

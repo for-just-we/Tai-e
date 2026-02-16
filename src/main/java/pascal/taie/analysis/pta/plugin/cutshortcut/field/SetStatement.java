@@ -2,6 +2,8 @@ package pascal.taie.analysis.pta.plugin.cutshortcut.field;
 
 import pascal.taie.ir.proginfo.FieldRef;
 
+import java.util.Objects;
+
 /**
  * {@link SetStatement}表示需要向前去寻找callSite，并把这种抽象的Set行为作用到callSite处的指针（参数）的语句
  * 和之前的SetStmt不同，现在的{@link SetStatement}并不一定是简单的{@link pascal.taie.ir.stmt.StoreField}语句

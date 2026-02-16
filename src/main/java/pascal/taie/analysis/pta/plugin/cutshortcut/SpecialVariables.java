@@ -3,18 +3,20 @@ package pascal.taie.analysis.pta.plugin.cutshortcut;
 import pascal.taie.analysis.pta.plugin.cutshortcut.field.ParameterIndex;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.LoadField;
+import pascal.taie.util.collection.Maps;
+import pascal.taie.util.collection.Sets;
 
 import java.util.Map;
 import java.util.Set;
 
 public class SpecialVariables {
-    private static Set<Var> definedVars;
+    private static final Set<Var> definedVars = Sets.newSet();
 
-    private static Set<Var> virtualVars;
+    private static final Set<Var> virtualVars = Sets.newSet();
 
-    private static Map<Var, ParameterIndex> definedParameterIndexes;
+    private static final Map<Var, ParameterIndex> definedParameterIndexes = Maps.newMap();
 
-    private static Set<LoadField> relayedLoadFields;
+    private static final Set<LoadField> relayedLoadFields = Sets.newSet();
 
     public static void setDefined(Var var) {
         definedVars.add(var);

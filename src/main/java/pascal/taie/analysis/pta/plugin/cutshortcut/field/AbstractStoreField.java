@@ -9,10 +9,6 @@ import pascal.taie.ir.stmt.StmtVisitor;
 public class AbstractStoreField extends FieldStmt<FieldAccess, Var> {
     public AbstractStoreField(FieldAccess lvalue, Var rvalue) {
         super(lvalue, rvalue);
-        if (lvalue instanceof InstanceFieldAccess) {
-            Var base = ((InstanceFieldAccess) lvalue).getBase();
-            base.addAbstractStoreField(this);
-        }
     }
 
     @Override

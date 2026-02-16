@@ -122,7 +122,7 @@ public class DefaultSolver implements Solver {
 
     private final PointsToSetFactory ptsFactory;
 
-    private final PropagateTypes propTypes;
+    protected final PropagateTypes propTypes;
 
     /**
      * Whether only analyzes application code.
@@ -400,7 +400,8 @@ public class DefaultSolver implements Solver {
                 JField field = load.getFieldRef().resolve();
                 pts.forEach(baseObj -> {
                     if (baseObj.getObject().isFunctional()) {
-                        InstanceField instField = csManager.getInstanceField(baseObj, field);
+                        InstanceField instField = csManager.getInstanceField(
+                                baseObj, field);
                         addPFGEdge(instField, to, FlowKind.INSTANCE_LOAD);
                     }
                 });

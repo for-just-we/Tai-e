@@ -1,148 +1,94 @@
 package pascal.taie.analysis.pta.plugin.cutshortcut.container;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import pascal.taie.util.AnalysisException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.ContExitCategory;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.ContainerType;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.ExtendType;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.IterExitCategory;
 
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 public class MakeDefaultContainerConfig {
-    private static final Logger logger = LogManager.getLogger(MakeDefaultContainerConfig.class);
-
-    private static void readFile(String fileName, String id, ContainerConfig config) {
-        BufferedReader reader = null;
-        try {
-            reader = new BufferedReader(new FileReader("DefaultContainerConfig/" + fileName));
-            String lineStr;
-            while ((lineStr = reader.readLine()) != null) {
-                if (lineStr.length() == 0)
-                    continue;
-                switch (id) {
-                    case "host" -> config.addHostClass(lineStr);
-                    case "exclusion" -> {
-                        int ind = lineStr.indexOf(' ');
-                        if (ind != -1) {
-                            String ks = lineStr.substring(0, ind), vs = lineStr.substring(ind + 1);
-                            config.addKeySetClass(ks);
-                            config.excludeClass(ks);
-                            config.addValueSetClass(vs);
-                            config.excludeClass(vs);
-                        }
-                        else
-                            config.excludeClass(lineStr);
-                    }
-                    case "extender0" -> config.addCorrelationExtender(lineStr, -1, 0);
-                    case "extender1" -> config.addCorrelationExtender(lineStr, -1, 1); // can be merged with the previous case
-                    case "unrelatedInvoke" -> config.addUnrelatedInvoke(lineStr);
-                    case "col-out" -> config.addCollectionValueOutMethod(lineStr);
-                    case "map-val-out" -> config.addMapValueOutMethod(lineStr);
-                    case "parameter" -> {
-                        int space1 = lineStr.indexOf(' '), space2 = lineStr.lastIndexOf(' ');
-                        String type   = lineStr.substring(0, space1),
-                                method = lineStr.substring(space1 + 1, space2),
-                                sIndex = lineStr.substring(space2 + 1);
-                        int index = Integer.parseInt(sIndex);
-                        config.addInParameter(method, index, type);
-                    }
-                    case "paraWithConstraint" -> {
-                        int space1 = lineStr.indexOf(' '), space3 = lineStr.lastIndexOf(' '),
-                                space2 = lineStr.lastIndexOf('>') + 1;
-                        String type   = lineStr.substring(0, space1),
-                                method = lineStr.substring(space1 + 1, space2),
-                                sIndex = lineStr.substring(space2 + 1, space3),
-                                cons   = lineStr.substring(space3 + 1);
-                        int index = Integer.parseInt(sIndex);
-                        config.addInParameter(method, index, type, cons);
-                    }
-                    case "array-init" -> {
-                        String[] info = lineStr.split("#");
-                        int index0 = Integer.parseInt(info[1]), index1 = Integer.parseInt(info[2]);
-                        config.addArrayInitializer(info[0], index0, index1);
-                    }
-                    case "iter" -> config.addIteratorClass(lineStr);
-                    case "entrySet" -> {
-                        String[] info = lineStr.split("#");
-                        config.addAllocationSiteOfEntrySet(info[0], info[1]);
-                    }
-                    default -> throw new AnalysisException("No such id for assigned correlation!");
-                }
-            }
-            reader.close();
-        } catch (FileNotFoundException f) {
-            logger.error(f);
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (IOException e1) {
-                    e1.printStackTrace();
-                }
-            }
-        }
-    }
-
-    public static ContainerConfig make() {
+    public static void make() {
         ContainerConfig config = ContainerConfig.config;
-        // In a more expressive way, a table?
-        // For every object of an outer class type, a new determinant will be generated at its allocation Site.
-        readFile("hostClasses.txt", "host", config);
-        readFile("exclusion.txt", "exclusion", config);
-        readFile("CorrelationExtenders.txt", "extender0", config);
-        readFile("CorrelationExtenders1.txt", "extender1", config);
-        readFile("unrelatedInvokes.txt", "unrelatedInvoke", config);
+        try {
+            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
-        config.addCorrelationExtender("<javax.security.auth.Subject$SecureSet: void <init>(javax.security.auth.Subject,int,java.util.Set)>", -1, 2);
-        // destination is the larger one, which means source is a subset of it.
+            // [Map/Col] classes
+            Map<String, List<String>> rawHostClassesData = mapper.readValue(
+                    Thread.currentThread().getContextClassLoader().getResourceAsStream("container-config/host-classes.yml"),
+                    new TypeReference<>() {});
+            rawHostClassesData.forEach((containerName, containerClasses) -> {
+                ContainerType containerType = ContainerType.getTypeName(containerName);
+                containerClasses.forEach(containerClassName ->
+                        config.addHostClass(containerType, containerClassName));
+            });
 
-        readFile("InMethod.txt", "parameter", config);
-        readFile("InWithCons.txt", "paraWithConstraint", config);
-        readFile("CollectionOut.txt", "col-out", config);
-        readFile("MapValueOut.txt", "map-val-out", config);
+            // [Other Class]
+            config.resolveUnmodeledClasses();
 
-        readFile("iteratorClass.txt", "iter", config);
-        readFile("ArrayInitializer.txt", "array-init", config);
+            // [Entrance-Append]
+            Map<String, List<Map<String, Object>>> rawEntranceAppendDatas = mapper.readValue(
+                    Thread.currentThread().getContextClassLoader().getResourceAsStream("container-config/entrance-append.yml"),
+                    new TypeReference<>() {});
+            rawEntranceAppendDatas.forEach((categoryName, APIInfos) -> {
+                ContExitCategory category = ContExitCategory.getCategory(categoryName);
+                APIInfos.stream().filter(Objects::nonNull).forEach(APIInfo -> {
+                    String methodSig = (String) APIInfo.get("signature");
+                    Integer index = (Integer) APIInfo.get("index");
+                    config.addEntranceAppendIndex(methodSig, category, index);
+                });
+            });
 
-        readFile("EntrySet.txt", "entrySet", config);
+            // [Entrance-Extend]
+            Map<String, List<Map<String, Object>>> rawEntranceExtendDatas = mapper.readValue(
+                    Thread.currentThread().getContextClassLoader().getResourceAsStream("container-config/entrance-extend.yml"),
+                    new TypeReference<>() {});
+            rawEntranceExtendDatas.forEach((extendTypeValue, APIInfos) -> {
+                ExtendType extendType = ExtendType.getExtendType(extendTypeValue);
+                APIInfos.stream().filter(Objects::nonNull).forEach(APIInfo -> {
+                    String methodSig = (String) APIInfo.get("signature");
+                    Integer index = (Integer) APIInfo.get("index");
+                    config.addEntranceExtendIndex(methodSig, extendType, index);
+                });
 
-        // TODO: some set methods are also get methods
-        config.addMapKeyExit(
-                "<java.util.TreeMap: java.lang.Object firstKey()>",
-                "<java.util.TreeMap: java.lang.Object lastKey()>",
-                "<java.util.TreeMap: java.lang.Object lowerKey(java.lang.Object)>",
-                "<java.util.TreeMap: java.lang.Object floorKey(java.lang.Object)>",
-                "<java.util.TreeMap: java.lang.Object ceilingKey(java.lang.Object)>",
-                "<java.util.TreeMap: java.lang.Object higherKey(java.lang.Object)>",
-                "<java.util.Collections$UnmodifiableSortedMap: java.lang.Object firstKey()>",
-                "<java.util.Collections$UnmodifiableSortedMap: java.lang.Object lastKey()>",
-                "<java.util.Collections$CheckedSortedMap: java.lang.Object firstKey()>",
-                "<java.util.Collections$CheckedSortedMap: java.lang.Object lastKey()>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object ceilingKey(java.lang.Object)>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object higherKey(java.lang.Object)>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object floorKey(java.lang.Object)>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object lowerKey(java.lang.Object)>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object firstKey()>",
-                "<java.util.TreeMap$NavigableSubMap: java.lang.Object lastKey()>",
-                "<java.util.TreeMap$SubMap: java.lang.Object firstKey()>",
-                "<java.util.TreeMap$SubMap: java.lang.Object lastKey()>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object ceilingKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object lowerKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object higherKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object floorKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object firstKey()>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object lastKey()>",
-                "<java.util.concurrent.ConcurrentSkipListMap$SubMap: java.lang.Object ceilingKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap: java.lang.Object lowerKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap: java.lang.Object higherKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap: java.lang.Object floorKey(java.lang.Object)>",
-                "<java.util.concurrent.ConcurrentSkipListMap: java.lang.Object firstKey()>",
-                "<java.util.concurrent.ConcurrentSkipListMap: java.lang.Object lastKey()>"
-        );
-        config.computeTaintClass();
-        return config;
+            });
+
+            // [Entrance-Array Initializer]
+            Map<String, List<Map<String, Object>>> rawArrayInitializerDatas = mapper.readValue(
+                    Thread.currentThread().getContextClassLoader().getResourceAsStream("container-config/array-initializer.yml"),
+                    new TypeReference<>() {});
+            rawArrayInitializerDatas.get("ArrayInit").forEach(APIInfo -> {
+                String methodSig = (String) APIInfo.get("signature");
+                Integer srcIndex = (Integer) APIInfo.get("src");
+                Integer dstIndex = (Integer) APIInfo.get("dst");
+                config.addArrayInitializer(methodSig, srcIndex, dstIndex);
+            });
+
+            // [Exit]
+            Map<String, List<String>> rawExitDatas = mapper.readValue(
+                    Thread.currentThread().getContextClassLoader().getResourceAsStream("container-config/exit.yml"),
+                    new TypeReference<>() {});
+            rawExitDatas.forEach((exitType, methodsigs) -> {
+                ContExitCategory category = ContExitCategory.getCategory(exitType);
+                IterExitCategory iterExitCategory = IterExitCategory.getCategory(exitType);
+                // Container-Exit
+                if (category != null)
+                    methodsigs.stream().filter(Objects::nonNull).forEach(methodsig -> config.addContainerExitCategory(methodsig, category));
+                // Iter-Exit
+                else if (iterExitCategory != null)
+                    methodsigs.stream().filter(Objects::nonNull).forEach(methodsig -> config.addIterExitCategory(methodsig, iterExitCategory));
+            });
+
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }

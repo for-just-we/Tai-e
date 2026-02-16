@@ -17,11 +17,11 @@ public class ReflectiveEdgeProperty {
         // args is a variable of array type which stores the argument of m in order
     }
 
-    private static Map<ReflectiveCallEdge, ReflectiveCallKind> reflectiveCallKindMap = Maps.newMap();
+    private static final Map<ReflectiveCallEdge, ReflectiveCallKind> reflectiveCallKindMap = Maps.newMap();
 
-    private static Map<ReflectiveCallEdge, Var> reflectiveCallVirtualArgMap = Maps.newMap();
+    private static final Map<ReflectiveCallEdge, Var> reflectiveCallVirtualArgMap = Maps.newMap();
 
-    public static void setgetReflectiveKind(ReflectiveCallEdge reflectiveCallEdge, ReflectiveCallKind kind) {
+    public static void setReflectiveKind(ReflectiveCallEdge reflectiveCallEdge, ReflectiveCallKind kind) {
         reflectiveCallKindMap.put(reflectiveCallEdge, kind);
     }
 

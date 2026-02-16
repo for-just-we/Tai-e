@@ -8,6 +8,7 @@ import pascal.taie.analysis.pta.plugin.reflection.ReflectiveCallEdge;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.InvokeInstanceExp;
+import pascal.taie.ir.exp.InvokeSpecial;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.util.AnalysisException;

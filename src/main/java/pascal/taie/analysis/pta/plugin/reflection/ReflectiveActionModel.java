@@ -54,6 +54,7 @@ import pascal.taie.language.type.Type;
 import pascal.taie.language.type.VoidType;
 import pascal.taie.util.collection.Maps;
 import pascal.taie.util.collection.MultiMap;
+import pascal.taie.analysis.pta.plugin.cutshortcut.ReflectiveEdgeProperty;
 
 import javax.annotation.Nullable;
 import java.util.Set;
@@ -64,7 +65,6 @@ import static pascal.taie.analysis.graph.flowgraph.FlowKind.RETURN;
 import static pascal.taie.analysis.graph.flowgraph.FlowKind.STATIC_STORE;
 import static pascal.taie.analysis.pta.plugin.cutshortcut.ReflectiveEdgeProperty.ReflectiveCallKind.METHOD_INVOKE;
 import static pascal.taie.analysis.pta.plugin.cutshortcut.ReflectiveEdgeProperty.ReflectiveCallKind.NEW_INSTANCE;
-import static pascal.taie.analysis.pta.plugin.cutshortcut.ReflectiveEdgeProperty.setgetReflectiveKind;
 import static pascal.taie.analysis.pta.plugin.util.InvokeUtils.BASE;
 
 /**
@@ -299,7 +299,7 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
         }
         ReflectiveCallEdge callEdge = new ReflectiveCallEdge(csCallSite,
                 csManager.getCSMethod(calleeCtx, callee), args);
-        setgetReflectiveKind(callEdge, kind);
+        ReflectiveEdgeProperty.setReflectiveKind(callEdge, kind);
         solver.addCallEdge(callEdge);
         allTargets.put(callSite, callee); // record target
     }

@@ -36,38 +36,42 @@ public class LocalFlowHandler implements Plugin {
 
     private CSManager csManager;
 
-    private Context emptyContext;
-
     private HeapModel heapModel;
 
     private int totIDMethod = 0;
 
+    // method -> set of parameter indices or new objects that are directly reach return vars without indirect-value flow
     private final MultiMap<JMethod, ParameterIndexOrNewObj> directlyReturnParams = Maps.newMultiMap();
 
     public void setSolver(Solver solver) {
         if (solver instanceof CutShortcutSolver cutShortcutSolver) {
             this.solver = cutShortcutSolver;
             csManager = solver.getCSManager();
-            emptyContext = solver.getContextSelector().getEmptyContext();
             heapModel = solver.getHeapModel();
         }
         else
             throw new AnalysisException("Invalid solver");
     }
 
+    /*
+     * process <v, newPts(v)> for callsite r = v.k(...)
+     */
     @Override
     public void onNewPointsToSet(CSVar csVar, PointsToSet pts) {
         Var base = csVar.getVar();
+        Context varContext = csVar.getContext();
+        // foreach r = v.k(...)
         for (Invoke callSite : base.getInvokes()) {
-            Var lhs = callSite.getLValue();
+            Var lhs = callSite.getLValue(); // r
             if (lhs != null && isConcerned(lhs)) {
-                CSVar csLHS = csManager.getCSVar(emptyContext, lhs);
+                CSVar csLHS = csManager.getCSVar(varContext, lhs); // <c, r>
                 pts.forEach(recvObj -> {
+                    // resolve v.k based on Type(o) where <c', o> \in newPts(v)
                     JMethod callee = CallGraphs.resolveCallee(
                             recvObj.getObject().getType(), callSite);
-                    if (callee != null && directlyReturnParams.get(callee).contains(INDEX_THIS)) {
+                    // if v -> r holds for this callee, add <c', o> to newPts(r)
+                    if (callee != null && directlyReturnParams.get(callee).contains(INDEX_THIS))
                         solver.addPointsTo(csLHS, recvObj);
-                    }
                 });
             }
         }
@@ -80,7 +84,7 @@ public class LocalFlowHandler implements Plugin {
             MultiMap<Var, ParameterIndexOrNewObj> result = getVariablesAssignedFromParameters(method);
             for (Var ret: retVars) {
                 if (!result.get(ret).isEmpty()) {
-                    totIDMethod ++;
+                    totIDMethod++;
                     break;
                 }
             }
@@ -88,7 +92,7 @@ public class LocalFlowHandler implements Plugin {
                 if (retVars.contains(var)) {
                     solver.addSelectedMethod(method);
                     directlyReturnParams.put(method, index);
-                    solver.addSpecialHandledRetVar(var);
+                    solver.addCutReturnVar(var);
                 }
             });
         }
@@ -97,21 +101,18 @@ public class LocalFlowHandler implements Plugin {
     private MultiMap<Var, ParameterIndexOrNewObj> getVariablesAssignedFromParameters(JMethod method) {
         MultiMap<Var, ParameterIndexOrNewObj> result = Maps.newMultiMap();
         MultiMap<Var, Stmt> definitions = Maps.newMultiMap();
-        method.getIR().forEach(stmt -> {
-            stmt.getDef().ifPresent(def -> {
-                if (def instanceof Var varDef) {
-                    definitions.put(varDef, stmt);
-                }
-            });
-        });
+        method.getIR().forEach(stmt -> stmt.getDef().ifPresent(def -> {
+            if (def instanceof Var varDef)
+                definitions.put(varDef, stmt);
+        }));
         for (int i = 0; i < method.getParamCount(); i++) {
             Var param = method.getIR().getParam(i);
             if (isConcerned(param)) { // parameter which is not redefined in the method body
                 if (definitions.get(param).isEmpty() || definitions.get(param).stream().allMatch(stmt -> stmt instanceof New)) {
                     result.put(param, new ParameterIndexOrNewObj(false, getRealParameterIndex(i), null));
-                    definitions.get(param).forEach(stmt -> {
-                        result.put(param, new ParameterIndexOrNewObj(true, null, heapModel.getObj((New) stmt)));
-                    });
+                    definitions.get(param).forEach(stmt -> result.put(param,
+                            new ParameterIndexOrNewObj(true, null, heapModel.getObj((New) stmt)))
+                    );
                 }
             }
         }
@@ -168,34 +169,44 @@ public class LocalFlowHandler implements Plugin {
         return result;
     }
 
+    /*
+     * process <c, l: r = v.k(...)> --> <c', m>
+     */
     @Override
     public void onNewCallEdge(Edge<CSCallSite, CSMethod> edge) {
-        CSMethod csCallee = edge.getCallee();
-        JMethod callee = csCallee.getMethod();
-        CSCallSite csCallSite = edge.getCallSite();
-        Invoke callSite = csCallSite.getCallSite();
-        InvokeExp invokeExp = callSite.getInvokeExp();
-        Var lhs = callSite.getLValue();
+        CSMethod csCallee = edge.getCallee(); // <c', m>
+        JMethod callee = csCallee.getMethod(); // m
+        Context calleeContext = csCallee.getContext(); // c'
+        CSCallSite csCallSite = edge.getCallSite(); // <c, l>
+        Context callSiteContext = csCallSite.getContext(); // c
+        Invoke callSite = csCallSite.getCallSite(); // l
+        InvokeExp invokeExp = callSite.getInvokeExp(); // r = v.k(...)
+        Var lhs = callSite.getLValue(); // r
         if (lhs != null && isConcerned(lhs)) {
-            CSVar csLHS = csManager.getCSVar(emptyContext, lhs);
+            CSVar csLHS = csManager.getCSVar(callSiteContext, lhs); // <c, r>
             directlyReturnParams.get(callee).forEach(indexOrObj -> {
+                // <c', o> \in newPts(<c, r>) \for o allocated in m
                 if (indexOrObj.isObj())
-                    solver.addPointsTo(csLHS, csManager.getCSObj(emptyContext, indexOrObj.obj()));
+                    solver.addPointsTo(csLHS, csManager.getCSObj(calleeContext, indexOrObj.obj()));
                 else {
+                    // in callee m, exist only direct-value flow between: this --> return.
                     ParameterIndex index = indexOrObj.index();
                     if (index == THISINDEX && invokeExp instanceof InvokeInstanceExp instanceExp) {
-                        CSVar csBase = csManager.getCSVar(emptyContext, instanceExp.getBase());
+                        CSVar csBase = csManager.getCSVar(callSiteContext, instanceExp.getBase()); // <c, v>
                         solver.getPointsToSetOf(csBase).forEach(csObj -> {
                             JMethod realCallee = CallGraphs.resolveCallee(csObj.getObject().getType(), callSite);
+                            // <c'', o> \in pts(<c, v>), Type(o) match m, then add <c'', o> to newPts(<c, r>)
                             if (callee.equals(realCallee))
                                 solver.addPointsTo(csLHS, csObj);
                         });
                     }
+                    // exist direct-value flow between: parameter i --> return.
                     if (index != THISINDEX) {
                         assert index != null;
-                        Var arg = getCorrespondingArgument(edge, index);
+                        Var arg = getCorrespondingArgument(edge, index); // ai
+                        // <c, ai> --> <c, r>
                         if (arg != null && isConcerned(arg))
-                            solver.addPFGEdge(new PointerFlowEdge(FlowKind.ID, csManager.getCSVar(emptyContext, arg), csLHS),
+                            solver.addPFGEdge(new PointerFlowEdge(FlowKind.ID, csManager.getCSVar(callSiteContext, arg), csLHS),
                                     lhs.getType());
                     }
                 }

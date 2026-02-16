@@ -39,11 +39,17 @@ public enum FlowKind {
     PARAMETER_PASSING,
     RETURN,
 
-    // local flow in cut-shortcut
-    ARG_TO_HOST, HOST_TO_RESULT, SUBSET, CORRELATION, ARRAYCOPY, ID,
+    // cut-shortcut
+    ARG_TO_HOST, // container entrance method, for example, v.add(e), o \in pts(v), e -> host(o)
+    HOST_TO_RESULT,
+    SUBSET,
+    CORRELATION,
+    ARRAYCOPY,
+    ID,
     VIRTUAL_ARRAY,
     VIRTUAL_ARG,
-    SET, GET, NON_RELAY_GET,
+    SET, GET,
+    NON_RELAY_GET, // relay edge
 
     OTHER,
 }

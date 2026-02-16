@@ -218,21 +218,6 @@ public class Var implements LValue, RValue, Indexable {
         return relevantStmts.getInvokes();
     }
 
-    // Support Cut-Shortcut field access pattern analysis
-    public void addAbstractLoadField(AbstractLoadField abstractLoadField) {
-        ensureRelevantStmts();
-        relevantStmts.addAbstractLoadField(abstractLoadField);
-    }
-
-    public List<AbstractLoadField> getAbstractLoadFields() { return relevantStmts.getAbstractLoadFields(); }
-
-    public void addAbstractStoreField(AbstractStoreField abstractStoreField) {
-        ensureRelevantStmts();
-        relevantStmts.addAbstractStoreField(abstractStoreField);
-    }
-
-    public List<AbstractStoreField> getAbstractStoreFields() { return relevantStmts.getAbstractStoreFields(); }
-
     /**
      * Ensure {@link #relevantStmts} points to an instance other than
      * {@link RelevantStmts#EMPTY}.
@@ -292,10 +277,6 @@ public class Var implements LValue, RValue, Indexable {
         private List<StoreArray> storeArrays = List.of();
         private List<Invoke> invokes = List.of();
 
-        // Support Cut-Shortcut field access pattern analysis
-        private List<AbstractLoadField> abstractLoadFields = List.of();
-        private List<AbstractStoreField> abstractStoreFields = List.of();
-
         private List<LoadField> getLoadFields() {
             return unmodifiable(loadFields);
         }
@@ -349,25 +330,6 @@ public class Var implements LValue, RValue, Indexable {
                 invokes = new ArrayList<>(DEFAULT_CAPACITY);
             }
             invokes.add(invoke);
-        }
-
-        // Support Cut-Shortcut field access pattern analysis
-        private List<AbstractStoreField> getAbstractStoreFields() { return unmodifiable(abstractStoreFields); }
-
-        private void addAbstractStoreField(AbstractStoreField abstractStoreField) {
-            if (abstractStoreFields.isEmpty()) {
-                abstractStoreFields = new ArrayList<>();
-            }
-            abstractStoreFields.add(abstractStoreField);
-        }
-
-        private List<AbstractLoadField> getAbstractLoadFields() { return unmodifiable(abstractLoadFields); }
-
-        private void addAbstractLoadField(AbstractLoadField abstractLoadField) {
-            if (abstractLoadFields.isEmpty()) {
-                abstractLoadFields = new ArrayList<>();
-            }
-            abstractLoadFields.add(abstractLoadField);
         }
 
         private static <T> List<T> unmodifiable(List<T> list) {

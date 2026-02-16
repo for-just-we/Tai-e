@@ -26,12 +26,9 @@ import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.HostMap.HostList;
-import pascal.taie.analysis.pta.plugin.cutshortcut.container.HostMap.HostSet;
-import pascal.taie.analysis.pta.plugin.cutshortcut.field.ParameterIndex;
+import pascal.taie.analysis.pta.plugin.cutshortcut.container.enums.HostKind;
+import pascal.taie.analysis.pta.plugin.cutshortcut.field.*;
 import pascal.taie.analysis.pta.pts.PointsToSet;
-import pascal.taie.ir.proginfo.FieldRef;
-import pascal.taie.language.classes.JMethod;
 import pascal.taie.util.collection.Maps;
 
 import java.util.ArrayDeque;
@@ -43,7 +40,6 @@ import java.util.Queue;
  * Represents work list in pointer analysis.
  */
 final class WorkList {
-
     /**
      * Pointer entries to be processed.
      */
@@ -78,13 +74,13 @@ final class WorkList {
         if (!callEdges.isEmpty()) {
             // for correctness, we need to ensure that any call edges in
             // the work list must be processed prior to the pointer entries
-            return new CallEdgeEntry(callEdges.poll());
+            return new WorkList.CallEdgeEntry(callEdges.poll());
         }
         else if (!pointerEntries.isEmpty()) {
             var it = pointerEntries.entrySet().iterator();
             var e = it.next();
             it.remove();
-            return new PointerEntry(e.getKey(), e.getValue());
+            return new WorkList.PointerEntry(e.getKey(), e.getValue());
         }
         else if (!setStmtEntries.isEmpty())
             return setStmtEntries.poll();
@@ -112,26 +108,27 @@ final class WorkList {
             implements Entry {
     }
 
-    record HostEntry(Pointer pointer, HostList.Kind kind, HostSet hostSet)
-            implements Entry {
+    record HostEntry(Pointer pointer, HostKind kind, PointsToSet hostSet)
+            implements WorkList.Entry {
     }
 
-    record SetStmtEntry(JMethod method, FieldRef fieldRef, ParameterIndex baseIndex, ParameterIndex rhsIndex)
-            implements Entry {
+    record SetStmtEntry(CSMethod csMethod, SetStatement setStmt)
+            implements WorkList.Entry {
     }
 
-    record GetStmtEntry(JMethod method, int lhsIndex, ParameterIndex baseIndex, FieldRef fieldRef)
-            implements Entry {
+    record GetStmtEntry(CSMethod csMethod, GetStatement getStmt)
+            implements WorkList.Entry {
     }
 
-    void addHostEntry(Pointer pointer, HostList.Kind kind, HostSet hostSet) {
+    void addHostEntry(Pointer pointer, HostKind kind, PointsToSet hostSet) {
         hostEntries.add(new HostEntry(pointer, kind, hostSet));
     }
-    void addSetStmtEntry(JMethod method, FieldRef fieldRef, ParameterIndex baseIndex, ParameterIndex rhsIndex) {
-        setStmtEntries.add(new SetStmtEntry(method, fieldRef, baseIndex, rhsIndex));
+
+    void addSetStmtEntry(CSMethod csMethod, SetStatement setStmt) {
+        setStmtEntries.add(new SetStmtEntry(csMethod, setStmt));
     }
 
-    void addGetStmtEntry(JMethod method, int lhsIndex, ParameterIndex baseIndex, FieldRef fieldRef) {
-        getStmtEntries.add(new GetStmtEntry(method, lhsIndex, baseIndex, fieldRef));
+    void addGetStmtEntry(CSMethod csMethod, GetStatement getStmt) {
+        getStmtEntries.add(new GetStmtEntry(csMethod, getStmt));
     }
 }

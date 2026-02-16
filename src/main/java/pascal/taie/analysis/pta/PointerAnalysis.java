@@ -116,7 +116,7 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
                                               ContextSelector selector,
                                               String solverType) {
         AnalysisOptions options = getOptions();
-        Solver solver = null;
+        Solver solver;
         if (solverType.equals("default"))
             solver = new DefaultSolver(options, heapModel, selector, new MapBasedCSManager());
         // cut-shortcut
